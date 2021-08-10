@@ -1,17 +1,22 @@
 import math
 import copy
 import torch
+import os
 from torch import nn, einsum
+import timeit
 import torch.nn.functional as F
 from inspect import isfunction
 from functools import partial
-
+import time
+from score.score import compute_is_and_fid
+from score.F_beta import calculate_f_beta_score,plot_pr_curve,calculate_f_beta_score_animeface
 from torch.utils import data
 from pathlib import Path
 from torch.optim import Adam
 from torchvision import transforms, utils
 from PIL import Image
-
+from torchvision.datasets import CIFAR10, STL10, CelebA
+from torchvision.datasets import ImageFolder
 import numpy as np
 from tqdm import tqdm
 from einops import rearrange
@@ -445,27 +450,50 @@ class GaussianDiffusion(nn.Module):
 # dataset classes
 
 class Dataset(data.Dataset):
-    def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png']):
+    def __init__(self, folder, dataset_name, train, image_size, exts = ['jpg', 'jpeg', 'png']):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
-        self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
-
-        self.transform = transforms.Compose([
-            transforms.Resize(image_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-            transforms.Lambda(lambda t: (t * 2) - 1)
-        ])
+        #self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
+        if train==True:
+            self.transform = transforms.Compose([
+                transforms.Resize(image_size),
+                transforms.RandomHorizontalFlip(),
+                transforms.CenterCrop(image_size),
+                transforms.ToTensor(),
+                #transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+                transforms.Lambda(lambda t: (t * 2) - 1)
+            ])
+        else:
+            self.transform = transforms.Compose([
+                transforms.Resize(image_size),
+                transforms.CenterCrop(image_size),
+                transforms.ToTensor(),
+                #transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+                transforms.Lambda(lambda t: (t * 2) - 1)
+            ])
+        if dataset_name == 'cifar10':
+            self.data = CIFAR10(root=folder,
+                                train=train,
+                                download=True)
+        elif dataset_name =='anemiface':
+            if train==True:
+                root = os.path.join('/dtu-compute/congen/animeface', 'train')
+            else:
+                root = os.path.join('/dtu-compute/congen/animeface', 'valid')
+            self.data = ImageFolder(root=root)
 
     def __len__(self):
-        return len(self.paths)
+        #return len(self.paths)
+        num_dataset = len(self.data)
+        return num_dataset
 
     def __getitem__(self, index):
-        path = self.paths[index]
-        img = Image.open(path)
-        return self.transform(img)
+        #path = self.data[index]
+        #img = Image.open(path)
+        img, label = self.data[index]
+        img, label = self.transform(img), int(label)
+        return img
 
 # trainer class
 
@@ -475,6 +503,8 @@ class Trainer(object):
         diffusion_model,
         folder,
         *,
+        train=True,
+        dataset_name='N/A',
         ema_decay = 0.995,
         image_size = 128,
         train_batch_size = 32,
@@ -484,10 +514,16 @@ class Trainer(object):
         fp16 = False,
         step_start_ema = 2000,
         update_ema_every = 10,
-        save_and_sample_every = 1000,
-        results_folder = './results'
+        save_and_sample_every = 100000,
+
+
     ):
         super().__init__()
+        #results_folder = './results_{}/{}'.format(dataset_name,int(time.time()))
+        #results_folder = '/home/congen/code/denoising-diffusion-pytorch/results_cifar10_1628248274'
+        results_folder = '/home/congen/code/denoising-diffusion-pytorch/results_anemiface/1628248423'
+        #results_folder = '/home/congen/code/denoising-diffusion-pytorch/results_anemiface'
+        #results_folder ='/home/congen/code/denoising-diffusion-pytorch/results'
         self.model = diffusion_model
         self.ema = EMA(ema_decay)
         self.ema_model = copy.deepcopy(self.model)
@@ -500,8 +536,7 @@ class Trainer(object):
         self.image_size = diffusion_model.image_size
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
-
-        self.ds = Dataset(folder, image_size)
+        self.ds = Dataset(folder, dataset_name,train,image_size)
         self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, pin_memory=True))
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
 
@@ -570,3 +605,54 @@ class Trainer(object):
             self.step += 1
 
         print('training completed')
+    def test(self):
+        self.load(20)
+        self.model.eval()
+        self.ema_model.eval()
+        #start = timeit.default_timer()
+        fake_images = self.ema_model.sample(batch_size=64)
+        all_images = (fake_images + 1) * 0.5
+        utils.save_image(all_images, str(self.results_folder / f'sample-{20}.png'), nrow=8)
+        #end = timeit.default_timer()
+        #print(end-start)
+        test_loader=data.DataLoader(self.ds, batch_size=100, shuffle=False, pin_memory=True,drop_last=False)
+        fid_cache='/home/congen/code/AGE-exp/datasets/tf_fid_stats_cifar10_32.npz'
+        n_generate = len(test_loader.dataset)
+        num_split, num_run4PR, num_cluster4PR, beta4PR = 1, 10, 20, 8
+        #is_scores, fid_score=compute_is_and_fid(self.ema_model, 100,
+                                                #fid_cache, n_generate=n_generate,splits=num_split)
+        is_scores,fid_score,precision, recall, f_beta, f_beta_inv = calculate_f_beta_score(test_loader, self.ema_model,
+                                n_generate,num_run4PR, num_cluster4PR, beta4PR,num_split,fid_cache)
+
+        #PR_Curve = plot_pr_curve(precision, recall,self.result_dir)
+
+        print('IS',is_scores)
+        print('FID',fid_score)
+        print('F8',f_beta)
+        print('F1/8',f_beta_inv)
+    def test_anemiface(self):
+        self.load(15)
+        self.model.eval()
+        self.ema_model.eval()
+        #start = timeit.default_timer()
+        #fake_images = self.ema_model.sample(batch_size=64)
+        #end = timeit.default_timer()
+        #print(end - start)
+        fake_images = self.ema_model.sample(batch_size=64)
+        all_images = (fake_images + 1) * 0.5
+        utils.save_image(all_images, str(self.results_folder / f'sample-{15}.png'), nrow=8)
+        test_loader=data.DataLoader(self.ds, batch_size=100, shuffle=False, pin_memory=True,drop_last=False)
+
+        n_generate =len(test_loader.dataset)
+        num_split, num_run4PR, num_cluster4PR, beta4PR = 1, 10, 20, 8
+        #is_scores, fid_score=compute_is_and_fid(self.ema_model, 100,
+                                                #fid_cache, n_generate=n_generate,splits=num_split)
+        is_scores,fid_score,precision, recall, f_beta, f_beta_inv = calculate_f_beta_score_animeface(test_loader, self.ema_model,
+                                n_generate,num_run4PR, num_cluster4PR, beta4PR,num_split)
+
+        #PR_Curve = plot_pr_curve(precision, recall,self.result_dir)
+
+        print('IS',is_scores)
+        print('FID',fid_score)
+        print('F8',f_beta)
+        print('F1/8',f_beta_inv)
