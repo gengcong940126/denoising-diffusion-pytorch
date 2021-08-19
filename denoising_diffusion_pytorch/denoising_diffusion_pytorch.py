@@ -520,10 +520,7 @@ class Trainer(object):
     ):
         super().__init__()
         #results_folder = './results_{}/{}'.format(dataset_name,int(time.time()))
-        #results_folder = '/home/congen/code/denoising-diffusion-pytorch/results_cifar10_1628248274'
-        results_folder = '/home/congen/code/denoising-diffusion-pytorch/results_anemiface/1628248423'
-        #results_folder = '/home/congen/code/denoising-diffusion-pytorch/results_anemiface'
-        #results_folder ='/home/congen/code/denoising-diffusion-pytorch/results'
+        results_folder = '/home/congen/code/denoising-diffusion-pytorch/results_cifar10/1629279938'
         self.model = diffusion_model
         self.ema = EMA(ema_decay)
         self.ema_model = copy.deepcopy(self.model)
@@ -606,13 +603,13 @@ class Trainer(object):
 
         print('training completed')
     def test(self):
-        self.load(20)
+        self.load(3)
         self.model.eval()
         self.ema_model.eval()
         #start = timeit.default_timer()
         fake_images = self.ema_model.sample(batch_size=64)
         all_images = (fake_images + 1) * 0.5
-        utils.save_image(all_images, str(self.results_folder / f'sample-{20}.png'), nrow=8)
+        utils.save_image(all_images, str(self.results_folder / f'sample-{2}.png'), nrow=8)
         #end = timeit.default_timer()
         #print(end-start)
         test_loader=data.DataLoader(self.ds, batch_size=100, shuffle=False, pin_memory=True,drop_last=False)
