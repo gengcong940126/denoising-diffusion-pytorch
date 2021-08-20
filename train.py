@@ -25,7 +25,7 @@ def main(train):
             train_lr = 2e-4,
             train_num_steps = 500001,         # total training steps
             gradient_accumulate_every = 2,    # gradient accumulation steps
-            ema_decay = 0.995,                # exponential moving average decay
+            ema_decay = 0.9999,                # exponential moving average decay
             fp16 = True                   # turn on mixed precision training with apex
         )
         #trainer.load(20)
@@ -33,8 +33,8 @@ def main(train):
     else:
 
         model = Unet(
-            dim=64,
-            dim_mults=(1, 2, 4, 8)
+            dim=128,
+            dim_mults=(1, 2, 2, 2)
         ).cuda()
 
         diffusion = GaussianDiffusion(
@@ -54,7 +54,7 @@ def main(train):
             train_lr=2e-4,
             train_num_steps=200001,  # total training steps
             gradient_accumulate_every=2,  # gradient accumulation steps
-            ema_decay=0.995,  # exponential moving average decay
+            ema_decay=0.9999,  # exponential moving average decay
             fp16=True  # turn on mixed precision training with apex
         )
         trainer.test()

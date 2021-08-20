@@ -520,7 +520,7 @@ class Trainer(object):
     ):
         super().__init__()
         #results_folder = './results_{}/{}'.format(dataset_name,int(time.time()))
-        results_folder = '/home/congen/code/denoising-diffusion-pytorch/results_cifar10/1629279938'
+        results_folder = './results_cifar10/1629381350'
         self.model = diffusion_model
         self.ema = EMA(ema_decay)
         self.ema_model = copy.deepcopy(self.model)
@@ -603,7 +603,7 @@ class Trainer(object):
 
         print('training completed')
     def test(self):
-        self.load(3)
+        self.load(2)
         self.model.eval()
         self.ema_model.eval()
         #start = timeit.default_timer()
